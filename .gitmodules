@@ -1,0 +1,3 @@
+[submodule "gaussian-histogram"]
+	path = gaussian-histogram
+	url = https://github.com/AliShazly/gaussian-histogram.git

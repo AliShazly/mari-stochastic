@@ -1,0 +1,92 @@
+<Node>
+    <ID>A_Stochastic</ID>
+    <DefaultName>Stochastic</DefaultName>
+    <Category>Procedural/Extension Pack/Generators/</Category>
+    <Description>
+        Stochastic texture tiling
+    </Description>
+    <Inputs>
+        <Input Name="Coordinates" PrettyName="Manifold"><Tags><Tag>_scalar</Tag><Tag>_omitGroupEmptyInput</Tag></Tags></Input>
+    </Inputs>
+    <Attributes>
+        <Attribute Name="PreserveHistogram" PrettyName="Histogram-preserving Blending" Type="bool" Description="Histogram preserving blending, requires precomputed maps" Group="Blending">false</Attribute>
+        <Attribute Name="Texture" PrettyName="Texture" Group="Texture Map" Type="image" GenerateMipMaps="true"></Attribute>
+        <Attribute Name="Size" PrettyName="Texture Size" Group="Texture Map" Type="int" Description="The size of the input texture, used for mipmapping">1024</Attribute>
+        <Attribute Name="Bias" PrettyName="LOD Bias" Group="Texture Map" Type="float" Min="-20.0" Max="20.0" Description="Offset on the mip level to sample. If the texture size is set correctly, this can be ignored."></Attribute>
+        <Attribute Name="Tinput" PrettyName="Gaussian Texture" Group="Precomputed Maps" Type="image" GenerateMipMaps="true" Description="The input texture with a transformed histogram"></Attribute>
+        <Attribute Name="Tinv" PrettyName="LUT" Group="Precomputed Maps" Type="image" GenerateMipMaps="false" Description="The precomputed look-up table, should be in the same color space as the input texture"></Attribute>
+    </Attributes>
+    <Groups>
+        <Group Name="Blending" Expanded="true"></Group>
+        <Group Name="Texture Map" Expanded="true"></Group>
+        <Group Name="Precomputed Maps" Expanded="false"></Group>
+    </Groups>
+    <Contexts>
+        <Context Type="NodeGraphView" ShapeType="4" NodeColorTop="0.910,0.639,0.221,1" NodeColorBottom="0.755,0.529,0.180,1">
+            <Inputs>
+                <Input Name="Coordinates"><Pos>0,-50</Pos></Input>
+            </Inputs>
+        </Context>
+        <Context Type="GLSL">
+            <Shader>
+                <Inputs>
+                    <Input Name="Coordinates"><Default>vec4(State.UV,0.0,1.0)</Default></Input>
+                </Inputs>
+                <Body><![CDATA[
+
+    // Written by Ali Shazly
+    // Based on: https://hal.inria.fr/hal-01824773
+
+    vec2 uv = #Coordinates.xy;
+    uv.y = - uv.y;
+
+    mat4x3 blendWeights;
+    
+    vec2 skewUV = (uv * 3.464) * (mat2(1.0 , 0.0 , -0.57735027 , 1.15470054));
+    
+    vec2 vertexID = vec2(floor(skewUV));
+    vec3 barry = vec3(fract(skewUV), 0);
+    barry.z = 1.0 - barry.x - barry.y;
+    
+    blendWeights = ((barry.z>0.0) ?
+        mat4x3(vec3(vertexID, 0), vec3(vertexID + vec2(0.0, 1.0), 0.0), vec3(vertexID + vec2(1.0, 0.0), 0.0), barry.zyx) :
+        mat4x3(vec3(vertexID + vec2 (1.0, 1.0), 0.0), vec3(vertexID + vec2 (1.0, 0.0), 0.0), vec3(vertexID + vec2 (0.0, 1.0), 0.0), vec3(-barry.z, 1.0-barry.y, 1.0-barry.x)));
+
+    vec2 uv1 = uv + fract(sin(blendWeights[0].xy * mat2(127.1, 311.7, 269.5, 183.3)) * 43758.5453);
+    vec2 uv2 = uv + fract(sin(blendWeights[1].xy * mat2(127.1, 311.7, 269.5, 183.3)) * 43758.5453);
+    vec2 uv3 = uv + fract(sin(blendWeights[2].xy * mat2(127.1, 311.7, 269.5, 183.3)) * 43758.5453);
+
+    // https://community.khronos.org/t/mipmap-level-calculation-using-dfdx-dfdy/67480
+    vec2 dx = dFdx(uv) * $Size; // FIXME: wouldn't it be great to have a way to read the texture size 
+    vec2 dy = dFdy(uv) * $Size; // we're meant to use textureGrad() with these, but it doesn't look possible
+    float delta_max_sqr = max(dot(dx, dx), dot(dy, dy));
+    float lod = 0.5 * log2(delta_max_sqr) + $Bias;
+
+    if ($PreserveHistogram) {
+        vec3 g1 = mriTextureLod($Tinput, uv1, lod).rgb;
+        vec3 g2 = mriTextureLod($Tinput, uv2, lod).rgb;
+        vec3 g3 = mriTextureLod($Tinput, uv3, lod).rgb;
+
+        vec3 g = blendWeights[3].x * g1 + blendWeights[3].y * g2 + blendWeights[3].z * g3;
+        g = g - vec3(0.5);
+        g = g * inversesqrt(blendWeights[3].x*blendWeights[3].x + blendWeights[3].y*blendWeights[3].y + blendWeights[3].z*blendWeights[3].z); 
+        g = g + vec3(0.5);
+
+        vec3 color;
+        color.r = mriTexture($Tinv, vec2(clamp(g.r,0.001,0.99), 0.0)).r;
+        color.g = mriTexture($Tinv, vec2(clamp(g.g,0.001,0.99), 0.0)).g;
+        color.b = mriTexture($Tinv, vec2(clamp(g.b,0.001,0.99), 0.0)).b;
+
+        Output = vec4(color,1.0);
+    } else {
+        Output = 
+            blendWeights[3].x * mriTextureLod($Texture, uv1, lod) +
+            blendWeights[3].y * mriTextureLod($Texture, uv2, lod) +
+            blendWeights[3].z * mriTextureLod($Texture, uv3, lod);
+    }
+
+                ]]></Body>
+            </Shader>
+        </Context>
+    </Contexts>
+</Node>
